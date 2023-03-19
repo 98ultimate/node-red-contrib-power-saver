@@ -11,12 +11,13 @@ const {
 const converted_prices = require("./data/converted-prices.json");
 const decreasing_end_prices = require("./data/tibber-decreasing2-24h.json");
 
-describe("Test heat capacitor strategy functions", () => {
+describe("ps-strategy-heat-capacitor-functions", () => {
   let prices, decreasing_24h_prices, start_date, buy_pattern, sell_pattern;
 
   //User input
   const timeHeat1C = 60;
   const timeCool1C = 40;
+  const setpoint = 23;
   const maxTempAdjustment = 1;
   const boostTempHeat = 1;
   const boostTempCool = 1;
@@ -79,6 +80,7 @@ describe("Test heat capacitor strategy functions", () => {
       my_buy_sell,
       buy_prices,
       sell_prices,
+      setpoint,
       maxTempAdjustment,
       boostTempHeat,
       boostTempCool,

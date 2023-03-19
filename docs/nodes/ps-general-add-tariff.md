@@ -1,8 +1,17 @@
+---
+prev: ./ps-schedule-merger.md
+next: ./ps-elvia-add-tariff.md
+---
+
 # ps-general-add-tariff
 
 ![ps-general-add-tariff](../images/node-ps-general-add-tariff.png)
 
 Node to add a value, for example a variable grid tariff, to the price before it is used to calculate savings in the strategy nodes.
+
+###
+
+<AdsenseAdd type="artikkel"/>
 
 ## Description
 
@@ -59,6 +68,10 @@ Fill in the last date the config is valid.
 
 If this is empty, the config is valid until forever.
 
+###
+
+<AdsenseAdd type="artikkel"/>
+
 ## Input
 
 The input is the [common strategy input format](./strategy-input.md)
@@ -68,3 +81,7 @@ The input is the [common strategy input format](./strategy-input.md)
 The output is the [common strategy input format](./strategy-input.md)
 
 If there is a config property in the input payload, it is passed on to the output payload.
+
+###
+
+<AdsenseAdd type="nederst"/>

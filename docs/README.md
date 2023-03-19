@@ -17,10 +17,10 @@ actions:
 features:
   - title: Automatic scheduling
     details: Automatically calculate best plan and send signal to turn on and off.
-  - title: Best Save Strategy
-    details: Postpone power consumption when there is most to save, perfect for the water heater.
-  - title: Lowest Price Strategy
-    details: Turn on power when the prices are the lowest, perfect for smart charging or heating.
+  - title: Multiple strategies
+    details: Different strategies for different purposes. See Best Save, Lowest Price and Heat Capacitor.
+  - title: Grid Capacity Optimization
+    details: Automatically turn off consumption to avoid breaking capacity limits.
   - title: Add variable grid tariff
     details: Automatically add values that varies on fixed hours, or use API to get grid tariff from Elvia.
   - title: Perfect with Home Assistant
@@ -32,6 +32,13 @@ footer: Created by Otto Paulsen and contributors
 footerHtml: true
 ---
 
+<AdsenseAdd type="artikkel"/>
+
 This is a collection of nodes for the popular [Node-RED](https://nodered.org/) that you can use to save money on variable electricity prices. Node-RED is a widely used low-code programming tool that can be used together with many smart home solutions to create automations.
+
+Please remember to take a look at our [privacy rules](./privacy.md).
+<br/>
+<br/>
+<br/>
 
 <DonateButtons/>

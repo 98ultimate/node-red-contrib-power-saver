@@ -1,81 +1,5 @@
 # Capacity part of grid tariff
 
-::: danger Bug-fix 12. September 2022
-
-::: details A bug was found 12. sep 2022. Here is how to fix:
-
-### 1. Node "Find highest per day":
-
-Replace this line:
-
-```js
-const highestToday = days.get(new Date().getDate());
-```
-
-With this code:
-
-```js
-const highestToday = days.get(new Date().getDate()) ?? {
-  consumption: 0,
-  from: null,
-};
-```
-
-This will set the `highestToday` to 0 during the first hour.
-
-### 2. Node "Calculate values":
-
-Above this line:
-
-```js
-  function calculateLevel(hourEstimate, ...
-```
-
-Insert this code:
-
-```js
-function isNull(value) {
-  return value === null || value === undefined;
-}
-```
-
-Further down the code you can find these 3 lines with 4 lines between:
-
-```js
-if (!highestPerDay) {
-if (!highestToday) {
-if (!hourEstimate) {
-```
-
-Change these to:
-
-```js
-if (isNull(highestPerDay)) {
-if (isNull(highestToday)) {
-if (isNull(hourEstimate)) {
-```
-
-Then these will not fail the first hour.
-
-### 3. Node "Build query for consumption":
-
-Find this line:
-
-```js
-const hour = time.getMinutes(); // NB Change to getMinutes()
-```
-
-Change it to:
-
-```js
-const hour = time.getHours();
-```
-
-The bug fixed on no. 3 does so data for hours are read every minute,
-instead of every hour. This is not necessary.
-However, it does not lead to any error.
-:::
-
 ## Introduction
 
 I Norway, there has been introduced a monthly fee for grid capacity.
@@ -103,10 +27,10 @@ and you may not want to use them all, so it is a good idea to read through it al
 
 ![Capacity Flow](../images/example-capacity-flow.png)
 
-The first part of nodes (upper left) is used to read consumption from Tibber and to perform all calculations.
-The second part (right) is used to update a set of sensors in HA. You can use those sensor for many
+The first part of nodes (upper part) is used to read consumption from Tibber, and to perform all calculations.
+The upper right two nodes are used to update a set of sensors in HA. You can use those sensor for many
 purposes related to the grid capacity.
-The third part (bottom left) is used to take actions in order to reduce power consumption,
+The bottom part is used to take actions in order to reduce power consumption,
 or to reset actions when the consumption is lowered.
 
 You may use the whole example, or only part of it, so you should read through the whole documentation before you start,
@@ -145,6 +69,7 @@ If you have the same information from other sources, you may be able to adapt th
 - Automatically take actions to reduce consumption if it is recommended or required.
 - Automatically reset actions if the consumption is sufficiently reduced.
 - Log actions taken to a file
+- Actions may also be done by directly and automatically overriding strategy nodes.
 
 ## Algorithm
 
@@ -176,8 +101,8 @@ See description for each of them for details.
 ## Calculated sensor values
 
 The `Calculate values` node creates a payload with values that are used to create
-sensors in Home Assistant. There is one `entity` node for each sensor value.
-You may delete the entity nodes for sensor values you don't need.
+sensors in Home Assistant. The `Update sensors` node maps these values to entity ids,
+and the `Set entity` node uses the HA API to update sensors.
 
 Here is a description of each of those sensor values.
 
@@ -501,6 +426,8 @@ context.set("buffer", []);
 ```js
 // Number of minutes used to calculate assumed consumption:
 const ESTIMATION_TIME_MINUTES = 1;
+// Allows records to deviate from maxAgeMs
+const DELAY_TIME_MS_ALLOWED = 3 * 1000;
 
 const buffer = context.get("buffer") || [];
 
@@ -516,7 +443,7 @@ currentHour.setMinutes(0);
 currentHour.setSeconds(0);
 
 // Remove too old records from buffer
-const maxAgeMs = ESTIMATION_TIME_MINUTES * 60 * 1000;
+const maxAgeMs = (ESTIMATION_TIME_MINUTES * 60 * 1000) + DELAY_TIME_MS_ALLOWED;
 let oldest = buffer[0];
 while (timeMs - oldest.timeMs > maxAgeMs) {
   buffer.splice(0, 1);
@@ -526,10 +453,16 @@ context.set("buffer", buffer);
 
 // Calculate buffer
 const periodMs = buffer[buffer.length - 1].timeMs - buffer[0].timeMs;
-const consumptionInPeriod = buffer[buffer.length - 1].accumulatedConsumption - buffer[0].accumulatedConsumption;
-if (periodMs === 0) {
-  return; // First item in buffer
+let consumptionInPeriod = buffer[buffer.length - 1].accumulatedConsumption - buffer[0].accumulatedConsumption;
+if (consumptionInPeriod < 0) {
+  consumptionInPeriod = 0;
 }
+if (periodMs === 0) {
+  //Should only occur during startup
+  node.status({ fill: "red", shape: "dot", text: "First item in buffer" });
+  return; // Stopping rest of the flow for this message
+}
+node.status({ fill: "green", shape: "dot", text: "Working" });
 
 // Estimate remaining of current hour
 const timeLeftMs = 60 * 60 * 1000 - (time.getMinutes() * 60000 + time.getSeconds() * 1000 + time.getMilliseconds());
@@ -621,6 +554,7 @@ const MAX_COUNTING = 3; // Number of days to calculate month average of
 const BUFFER = 0.5; // kWh - Closer to limit increases alarm level
 const SAFE_SONE = 2; // kWh - Further from limit reduces level
 const ALARM = 8; // Min level that causes status to be alarm
+const MIN_TIMELEFT = 30; //Min level for time left (30 seconds)
 ```
 
 The `HA_NAME` must be set to the name you have given your Home Assistant. One place to find this is in Node-RED,
@@ -642,14 +576,16 @@ See [Calculated sensor values](#calculated-sensor-values) for description of the
 
 ```js
 const HA_NAME = "homeAssistant"; // Your HA name
-const STEPS = [2, 5, 10, 15, 20];
+const STEPS = [10, 15, 20];
 const MAX_COUNTING = 3; // Number of days to calculate month
 const BUFFER = 0.5; // Closer to limit increases level
 const SAFE_ZONE = 2; // Further from limit reduces level
 const ALARM = 8; // Min level that causes status to be alarm
+const MIN_TIMELEFT = 3 * 60; //Min level for time left
 
 const ha = global.get("homeassistant")[HA_NAME];
 if (!ha.isConnected) {
+  node.status({ fill: "red", shape: "dot", text: "Ha not connected" });
   return;
 }
 
@@ -715,6 +651,7 @@ const averageConsumptionNow = msg.payload.averageConsumptionNow;
 const currentHour = msg.payload.currentHour;
 
 if (timeLeftSec === 0) {
+  node.status({ fill: "red", shape: "dot", text: "Time Left 0" });
   return null;
 }
 
@@ -762,17 +699,19 @@ const alarmLevel = calculateLevel(hourEstimate, currentHourRanking, currentMonth
 // Evaluate status
 const status = alarmLevel >= ALARM ? "Alarm" : alarmLevel > 0 ? "Warning" : "Ok";
 
+// Avoid calculations to increase too much when timeLeftSec is approaching zero
+const minTimeLeftSec = Math.max(timeLeftSec, MIN_TIMELEFT);
 // Calculate reduction
 const reductionRequired =
   alarmLevel < ALARM
     ? 0
-    : (Math.max((currentMonthlyEstimate - currentStep) * highestCounting.length, 0) * 3600) / timeLeftSec;
+    : (Math.max((currentMonthlyEstimate - currentStep) * highestCounting.length, 0) * 3600) / minTimeLeftSec;
 const reductionRecommended =
-  alarmLevel < 3 ? 0 : (Math.max(hourEstimate + SAFE_ZONE - currentStep, 0) * 3600) / timeLeftSec;
+  alarmLevel < 3 ? 0 : (Math.max(hourEstimate + SAFE_ZONE - currentStep, 0) * 3600) / minTimeLeftSec;
 
 // Calculate increase possible
 const increasePossible =
-  alarmLevel >= 3 ? 0 : (Math.max(currentStep - hourEstimate - SAFE_ZONE, 0) * 3600) / timeLeftSec;
+  alarmLevel >= 3 ? 0 : (Math.max(currentStep - hourEstimate - SAFE_ZONE, 0) * 3600) / minTimeLeftSec;
 
 // Create output
 const fill = status === "Ok" ? "green" : status === "Alarm" ? "red" : "yellow";
@@ -790,6 +729,8 @@ const payload = {
   highestCounting,
   highestCountingWithCurrent,
   highestToday,
+  highestTodayConsumption: highestToday.consumption,
+  highestTodayFrom: highestToday.from,
   currentMonthlyEstimate: Math.round(currentMonthlyEstimate * RESOLUTION) / RESOLUTION,
   accumulatedConsumptionLastHour: Math.round(accumulatedConsumptionLastHour * RESOLUTION) / RESOLUTION,
   consumptionLeft: Math.round(consumptionLeft * RESOLUTION) / RESOLUTION,
@@ -815,6 +756,61 @@ return msg;
 
 :::
 
+### Update sensors
+
+This function node maps the values from the previous node to entity_ids that shall be updated in HA.
+Then, for each sensor, it sends output that uses the API node to perform the actual update.
+
+You can remove sensors that you do not want.
+
+::: details Code
+
+<CodeGroup>
+  <CodeGroupItem title="On Message" active>
+
+```js
+const sensors = [
+  { id: "sensor.ps_cap_status", value: "status", uom: null },
+  { id: "binary_sensor.ps_cap_ok", value: "statusOk", uom: null },
+  { id: "binary_sensor.ps_cap_warning", value: "statusWarning", uom: null },
+  { id: "binary_sensor.ps_cap_alarm", value: "statusAlarm", uom: null },
+  { id: "sensor.ps_cap_alarm_level", value: "alarmLevel", uom: null },
+  { id: "sensor.ps_cap_current_step", value: "currentStep", uom: "kW" },
+  { id: "sensor.ps_cap_hour_estimate", value: "hourEstimate", uom: "kW" },
+  { id: "sensor.ps_cap_current_hour_ranking", value: "currentHourRanking", uom: null },
+  { id: "sensor.ps_cap_monthly_estimate", value: "currentMonthlyEstimate", uom: "kW" },
+  { id: "sensor.ps_cap_highest_today", value: "highestTodayConsumption", uom: "kW" },
+  { id: "sensor.ps_cap_highest_today_time", value: "highestTodayFrom", uom: null },
+  { id: "sensor.ps_cap_reduction_required", value: "reductionRequired", uom: "kW" },
+  { id: "sensor.ps_cap_reduction_recommended", value: "reductionRecommended", uom: "kW" },
+  { id: "sensor.ps_cap_increase_possible", value: "increasePossible", uom: "kW" },
+  { id: "sensor.ps_cap_estimate_rest_of_hour", value: "consumptionLeft", uom: "kW" },
+  { id: "sensor.ps_cap_consumption_accumulated_hour", value: "accumulatedConsumptionLastHour", uom: "kW" },
+  { id: "sensor.ps_cap_time_left", value: "timeLeftSec", uom: "s" },
+  { id: "sensor.ps_cap_consumption_now", value: "averageConsumptionNow", uom: "kW" },
+];
+
+sensors.forEach((sensor) => {
+  const payload = {
+    protocol: "http",
+    method: "post",
+    path: "/api/states/" + sensor.id,
+    data: {
+      state: msg.payload[sensor.value],
+      attributes: { unit_of_measurement: sensor.uom },
+    },
+  };
+  node.send({ payload });
+});
+```
+
+  </CodeGroupItem>
+</CodeGroup>
+
+:::
+
+### Set entity
+
 ### Reduction Actions
 
 This is where you set up actions to be taken in case reduction is required or recommended.
@@ -827,34 +823,74 @@ In the **On Start** tab of this node, you set up the actions by writing a Javasc
 the `actions` array.
 The example shows some actions, but you may set up any number of actions.
 
-Actions are taken by sending a payload to a HA `call service` node (the `Perform action` node).
+There are two types of actions that can be sent:
+
+#### Call service actions
+
+These actions are taken by sending a payload to a HA `call service` node (the `Perform action` node).
 The items in the `actions` array contains the payload you need to send to the `call service` node
 in order to take action, and the payload you need to send to the same `call service` node
 in order to reset the action.
 
+#### Override Power Saver actions
+
+These actions are taken by sending an override message to one or more strategy nodes.
+Reduction is done by sending override `off`, and reset is done by sending override `auto`.
+To use this type of action, specify the name of the strategy node that shall be overridden
+in the `nameOfStrategyToOverride` attribute of the action.
+
+Then send output 2 from the `Reduction Actions` node to the input of the strategy node.
+
+You may have multiple actions controlling multiple strategy nodes. They are separated using the `name`
+of the strategy node, so make sure they all have different names.
+Output 2 must be sent to all strategy nodes that shall be controlled.
+
+If you send the output to two strategy nodes with the same name, they will both be controlled.
+
+You can use this to override the following nodes:
+
+- Best Save
+- Lowest Price
+- Schedule Merger
+- Fixed Schedule
+
+If you are using the schedule merger node, you do not have to override the strategy nodes preceding the schedule merger,
+only override the schedule merger.
+
+#### Entity consumption
+
 An action may be to turn on or off a switch, to perform a climate control or what ever else
 you can do to control your entities.
 
-In order to know how much power that is saved by turning off an action, each item must have a sensor
-to give this information. This way, if a device is not using any power, the action will not be taken.
+In order to know how much power that is saved by turning off an action, you should specify this for each action, using the `consumption` attribute. This can be used in 3 different ways:
 
-::: warning Entity consumption
-In the current example, there must be a sensor holding the consumption of the entity to
-turn off. If this is not possible, the code must be changed in order to work.
+- The entity_id of a sensor that gives the consumption in kW (recommended)
+- A number with the consumption in kW
+- A function returning the consumption.
+
+::: warning Consumption must be kW
+If your sensor gives consumption in W, not the required kW, you should find a way to divide it by 1000.
 :::
+
+#### Actions configuration
 
 Each item in the `actions` array contains the following data:
 
-| Variable name         | Description                                                                                                                                                                                                                               |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| consumption           | The consumption that will be reduced by taking the action, given as either a) (Recommended) The entity_id of a sensor that gives the consumption, or b) A number with the consumption in kWh, or c) a function returning the consumption. |
-| name                  | The name of the actions. Can be any thing.                                                                                                                                                                                                |
-| id                    | A unique id of the action.                                                                                                                                                                                                                |
-| minAlarmLevel         | The minimum alarm level that must be present to take this action.                                                                                                                                                                         |
-| reduceWhenRecommended | If `true` the action will be taken when `Reduction Recommended` > 0. If `false` the action will be taken only when `Reduction Required` > 0                                                                                               |
-| minTimeOffSec         | The action will not be reset until minimum this number of seconds has passed since the action was taken.                                                                                                                                  |
-| payloadToTakeAction   | The payload that shall be sent to the `call service` node to take the action (for example turn off a switch).                                                                                                                             |
-| payloadToResetAction  | The payload that shall be sent to the `call service` node to reset the action (for example turn a switch back on again).                                                                                                                  |
+| Variable name            | Description                                                                                                                                                                                                                               |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| consumption              | The consumption that will be reduced by taking the action, given as either a) (Recommended) The entity_id of a sensor that gives the consumption, or b) A number with the consumption in kWh, or c) a function returning the consumption. |
+| name                     | The name of the actions. Can be any thing.                                                                                                                                                                                                |
+| id                       | A unique id of the action.                                                                                                                                                                                                                |
+| minAlarmLevel            | The minimum alarm level that must be present to take this action.                                                                                                                                                                         |
+| reduceWhenRecommended    | If `true` the action will be taken when `Reduction Recommended` > 0. If `false` the action will be taken only when `Reduction Required` > 0                                                                                               |
+| minTimeOffSec            | The action will not be reset until minimum this number of seconds has passed since the action was taken.                                                                                                                                  |
+| payloadToTakeAction      | The payload that shall be sent to the `call service` node to take the action (for example turn off a switch).                                                                                                                             |
+| payloadToResetAction     | The payload that shall be sent to the `call service` node to reset the action (for example turn a switch back on again).                                                                                                                  |
+| nameOfStrategyToOverride | The name of the strategy node that shall be overridden by this action.                                                                                                                                                                    |
+
+::: warning Action type
+Use either `nameOfStrategyToOverride` or `payloadToTakeAction` and `payloadToResetAction`. If you use them both at the same time, both actions are performed.
+:::
 
 ::: tip Actions order
 Actions to reduce consumption are taken in the order they appear in the `actions` array until enough reduction has been done,
@@ -873,6 +909,8 @@ If you don't want the actions, or you want to control actions another way,
 you can omit the action-related nodes and only use the nodes creating the sensors.
 :::
 
+The `MIN_MINUTES_INTO_HOUR_TO_TAKE_ACTION` constant in the `On Message` code sets a period (of default 5 minutes) in the beginning of the hour when no reduction action is taken. This is to avoid that a high consumption at the end of the previous hour causes reduction actions to be taken as soon as the hour changes.
+
 ::: details Code
 
 <CodeGroup>
@@ -889,20 +927,7 @@ const actions = [
     minAlarmLevel: 3,
     reduceWhenRecommended: true,
     minTimeOffSec: 300,
-    payloadToTakeAction: {
-      domain: "switch",
-      service: "turn_off",
-      target: {
-        entity_id: ["switch.varmtvannsbereder"],
-      },
-    },
-    payloadToResetAction: {
-      domain: "switch",
-      service: "turn_on",
-      target: {
-        entity_id: ["switch.varmtvannsbereder"],
-      },
-    },
+    nameOfStrategyToOverride: "Lowest Price VVB",
   },
   {
     consumption: "sensor.varme_gulv_bad_electric_consumption_w_2",
@@ -911,20 +936,7 @@ const actions = [
     minAlarmLevel: 3,
     reduceWhenRecommended: true,
     minTimeOffSec: 300,
-    payloadToTakeAction: {
-      domain: "climate",
-      service: "turn_off",
-      target: {
-        entity_id: ["climate.varme_gulv_bad_2"],
-      },
-    },
-    payloadToResetAction: {
-      domain: "climate",
-      service: "turn_on",
-      target: {
-        entity_id: ["climate.varme_gulv_bad_2"],
-      },
-    },
+    nameOfStrategyToOverride: "Lowest Price Varmekabel",
   },
   {
     consumption: "sensor.varme_gulv_gang_electric_consumption_w",
@@ -1012,6 +1024,7 @@ flow.set("actions", actions);
 
 ```js
 const MIN_CONSUMPTION_TO_CARE = 0.05; // Do not reduce unless at least 50W
+const MIN_MINUTES_INTO_HOUR_TO_TAKE_ACTION = 5;
 
 const actions = flow.get("actions");
 const ha = global.get("homeassistant").homeAssistant;
@@ -1019,8 +1032,19 @@ const ha = global.get("homeassistant").homeAssistant;
 let reductionRequired = msg.payload.reductionRequired;
 let reductionRecommended = msg.payload.reductionRecommended;
 
+node.status({});
+
 if (reductionRecommended <= 0) {
   return null;
+}
+
+if (3600 - msg.payload.timeLeftSec < MIN_MINUTES_INTO_HOUR_TO_TAKE_ACTION * 60) {
+  node.status({
+    fill: "yellow",
+    shape: "ring",
+    text: "No action during first " + MIN_MINUTES_INTO_HOUR_TO_TAKE_ACTION + " minutes",
+  });
+  return;
 }
 
 function takeAction(action, consumption) {
@@ -1030,7 +1054,17 @@ function takeAction(action, consumption) {
     data: msg.payload,
     action,
   };
-  node.send([{ payload: action.payloadToTakeAction }, { payload: info }]);
+
+  // output1 is for actions
+  const output1 = action.payloadToTakeAction ? { payload: action.payloadToTakeAction } : null;
+  // output 2 is for overriding PS strategies
+  const output2 = action.nameOfStrategyToOverride
+    ? { payload: { config: { override: "off" }, name: action.nameOfStrategyToOverride } }
+    : null;
+  // output 3 is for logging
+  const output3 = { payload: info };
+
+  node.send([output1, output2, output3]);
   reductionRequired = Math.max(0, reductionRequired - consumption);
   reductionRecommended = Math.max(0, reductionRecommended - consumption);
   action.actionTaken = true;
@@ -1042,7 +1076,7 @@ function takeAction(action, consumption) {
 function getConsumption(consumption) {
   if (typeof consumption === "string") {
     const sensor = ha.states[consumption];
-    return sensor.state;
+    return sensor.state / 1000;
   } else if (typeof consumption === "number") {
     return consumption;
   } else if (typeof consumption === "function") {
@@ -1099,10 +1133,16 @@ function resetAction(action) {
   const info = {
     time: new Date().toISOString(),
     name: "Reset action",
-    data: msg.paylaod,
+    data: msg.payload,
     action,
   };
-  node.send([{ payload: action.payloadToResetAction }, { payload: info }]);
+  const output1 = action.payloadToResetAction ? { payload: action.payloadToResetAction } : null;
+  const output2 = action.nameOfStrategyToOverride
+    ? { payload: { config: { override: "auto" }, name: action.nameOfStrategyToOverride } }
+    : null;
+  const output3 = { payload: info };
+
+  node.send([output1, output2, output3]);
   increasePossible -= action.savedConsumption;
   action.actionTaken = false;
   action.savedConsumption = 0;
@@ -1126,7 +1166,7 @@ actions
 
 ### Perform action
 
-This is a `call service` node used to perform the actions (both taking actions and resetting actions).
+This is a `call service` node used to perform the call service actions (both taking actions and resetting actions).
 There is no setup here except selecting the HA server.
 
 ### Save actions to file
@@ -1138,16 +1178,11 @@ Please make sure the file name configured works for you (for example that the fo
 
 This is supposed to catch any errors in the action-related nodes, and log them to the file.
 
-### Entity nodes
-
-There is a large number of `entity` nodes, one for each sensor value that is created with values from the `Calculate values` node.
-See [Calculated sensor values](#calculated-sensor-values) for description of each sensor value.
-
 ## The code
 
 Below is the code for the Node-RED flow.
 Copy the code and paste it to Node-RED using Import in the NR menu.
 
 ::: details Flow code
-@[code](./example-grid-tariff-capacity-flow.json)
+@[code](../../examples/example-grid-tariff-capacity-flow.json)
 :::

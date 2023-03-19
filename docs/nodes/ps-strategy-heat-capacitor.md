@@ -1,4 +1,9 @@
-# ps-strategy-heat-capacitor <Badge type="warning">Experimental</Badge>
+---
+prev: ./ps-strategy-lowest-price.md
+next: ./ps-strategy-fixed-schedule.md
+---
+
+# ps-strategy-heat-capacitor
 
 ![ps-strategy-lowest-price](../images/node-ps-strategy-heat-capacitor.png)
 
@@ -31,6 +36,10 @@ It is a good application for cabins/heated storage spaces, as the entity never a
 ![Simple example with Tibber](../images/node-ps-strategy-heat-capacitor-simple-flow-example.png)
 
 The node consumes price information and outputs $\Delta T$ on its first output and the planned schedule and benefit calculations on the second output. The $\Delta T$ is used to adjust the set-point of a climate entity.
+
+###
+
+<AdsenseAdd type="artikkel"/>
 
 ### The impact of **Time +1C**
 
@@ -344,3 +353,7 @@ Full example:
   ]
 }
 ```
+
+###
+
+<AdsenseAdd type="nederst"/>
