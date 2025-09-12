@@ -1,5 +1,7 @@
 const expect = require("chai").expect;
 const { convertMsg } = require("../src/receive-price-functions");
+const energidataserviceMsg = require("./data/energidataservice-event-state.json");
+const energidataserviceExpected = require("./data/energidataservice-converted.json");
 
 describe("receive-price-functions", () => {
   it("can convert input msg", () => {
@@ -169,5 +171,10 @@ describe("receive-price-functions", () => {
       source: "Other",
       ...msgStdTodayOnly.payload,
     });
+  });
+
+  it("can convert energidataservice format", () => {
+    const result = convertMsg(energidataserviceMsg);
+    expect(result).to.eql(energidataserviceExpected);
   });
 });
